@@ -43,8 +43,6 @@ class TelegramBot:
                         title=response["response"],
                         performer=response["name"],
                     )
-                    # self.bot.reply_to(message, text, parse_mode="HTML", audio=io.StringIO(audio_data))
-                    # self.bot.reply_to(message, text, parse_mode="HTML")
 
 
         @self.bot.inline_handler(lambda x: len(x.query) > 2)
@@ -53,11 +51,26 @@ class TelegramBot:
             results = []
             for response in responses:
                 text = f"<a href='{response['url']}'><b>{response['response']}</b></a> - <i>{response['name']}</i>"
+                audio_response = requests.get(response["url"])
                 results.append(
-                    telebot.types.InlineQueryResultArticle(
-                        id=len(results) + 1, 
-                        title=f"'{response['response']}' - {response['name']}", 
-                        input_message_content=telebot.types.InputTextMessageContent(text, parse_mode="HTML")))
+                    telebot.types.InlineQueryResultAudio(
+                        id=len(results) + 1,
+                        audio_url=response["url"],
+                        title=response['response'],
+                        caption=text,
+                        parse_mode="HTML",
+                        performer=response["name"],
+                        audio_duration=int(MPEGInfo(io.BytesIO(audio_response.content)).length) + 1,
+                        input_message_content=telebot.types.InputMediaAudio(
+                            media=io.BytesIO(audio_response.content),
+                            caption=text,
+                            parse_mode="HTML",
+                            duration=MPEGInfo(io.BytesIO(audio_response.content)).length,
+                            performer=response["name"],
+                            title=response["response"]
+                        )
+                    )
+                )
                 if len(results) == 50:
                     break
 
