@@ -1,7 +1,11 @@
+import io
 import random
+import re
 import string
 
 from flask import Flask, url_for
+from mutagen.mp3 import MPEGInfo
+import requests
 import telebot
 
 from app.dotawiki import DotaWikiScrapper
@@ -22,11 +26,25 @@ class TelegramBot:
 
         @self.bot.message_handler(content_types=["text"])
         def dota_response_handler(message: telebot.types.Message):
-            responses = scrapper.pick_random_hero_response(message.text, strict=True, multi=True)
-            if responses:
-                response = random.choice(scrapper.pick_random_hero_response(message.text, strict=True, multi=True))
-                text = f"<a href='{response['url']}'><b>{response['response']}</b></a> - <i>{response['name']}</i>"
-                self.bot.reply_to(message, text, parse_mode="HTML")
+            pattern = re.compile("[a-zA-Z0-9_ " + string.punctuation + "]")
+            if re.match(pattern, message.text):
+                responses = scrapper.pick_random_hero_response(message.text, strict=True, multi=True)
+                if responses:
+                    response = random.choice(scrapper.pick_random_hero_response(message.text, strict=True, multi=True))
+                    text = f"<a href='{response['url']}'><b>{response['response']}</b></a> - <i>{response['name']}</i>"
+                    audio_response = requests.get(response["url"])
+                    self.bot.send_audio(
+                        chat_id=message.chat.id,
+                        audio=io.BytesIO(audio_response.content), 
+                        caption=text,
+                        parse_mode="HTML",
+                        reply_to_message_id=message.id,
+                        duration=MPEGInfo(io.BytesIO(audio_response.content)).length,
+                        title=response["response"],
+                        performer=response["name"],
+                    )
+                    # self.bot.reply_to(message, text, parse_mode="HTML", audio=io.StringIO(audio_data))
+                    # self.bot.reply_to(message, text, parse_mode="HTML")
 
 
         @self.bot.inline_handler(lambda x: len(x.query) > 2)

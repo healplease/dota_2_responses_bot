@@ -51,7 +51,7 @@ class DotaWikiScrapper:
             return el.find(text=True, recursive=False)
 
         responses = {
-            element.text.replace("Link▶️", "").strip(): element.select_one("source")["src"]
+            element.text.replace("Link▶️", "").strip(): element.select_one("source")["src"].split("?")[0]
             for element
             in responses_elements
             if (sanitize_response(element) and element.select("source") and not element.select("small span"))
