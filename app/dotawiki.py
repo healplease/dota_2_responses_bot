@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import string
 from urllib.parse import urljoin
 
 import bs4
@@ -59,22 +60,37 @@ class DotaWikiScrapper:
         return responses
 
     def pick_random_hero_response(self, response: str, strict: bool=True, multi: bool=False):
+        multi_list = []
+        response_stripped = response.lower()
+        for item in string.punctuation:
+            response_stripped = response_stripped.replace(item, "")
         heroes_list = list(self.responses.keys())
         random.shuffle(heroes_list)
         for hero_id in heroes_list:
             keys = list(self.responses[hero_id]["responses"].keys())
-            if not strict:
-                keys = [x.lower() for x in keys]
-            if response in keys:
-                print(f"dotawiki - Found response '{response}' of {self.responses[hero_id]['name']}")
-                return {
-                    "response": response,
-                    "url": self.responses[hero_id]["responses"][response],
-                    "name": self.responses[hero_id]["name"]
-                }
-        print(f"dotawiki - No hero response found for '{response}'.")
-        return None
+            for key in keys:
+                key_stripped = key.lower()
+                for item in string.punctuation:
+                    key_stripped = key_stripped.replace(item, "")
+                rule = response_stripped == key_stripped if strict else response_stripped in key_stripped
+                if rule:
+                    print(f"dotawiki - Found response '{key}' of {self.responses[hero_id]['name']}")
+                    hero_response = {
+                        "response": key,
+                        "url": self.responses[hero_id]["responses"][key],
+                        "name": self.responses[hero_id]["name"]
+                    }
+                    if not multi:
+                        return hero_response
+                    else:
+                        multi_list.append(hero_response)
+        if not multi:
+            print(f"dotawiki - No hero response found for '{response}'.")
+            return None
+        else:
+            print(f"dotawiki - Found {len(multi_list)} responses for '{response}'.")
+            return multi_list
 
 if __name__ == "__main__":
     scrapper = DotaWikiScrapper()
-    # print(scrapper.pick_random_hero_response("Ha ha!"))
+    print(scrapper.pick_random_hero_response("who calls", strict=False, multi=True))
