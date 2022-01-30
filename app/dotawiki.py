@@ -1,11 +1,15 @@
 import json
 import os
 import random
+import re
 import string
+import time
 from urllib.parse import urljoin
 
 import bs4
 import requests
+
+from app.models import Hero, HeroResponse
 
 
 class DotaWikiScrapper:
@@ -16,7 +20,6 @@ class DotaWikiScrapper:
             print("dotawiki - Loading responses from cache")
             with open(self.cache, "r", encoding="utf-8") as cached:
                 self.responses = json.load(cached)
-            print(f"dotawiki - Loaded {len(tuple(self.responses.keys()))} heroes' responses.")
         else:
             print("dotawiki - Loading responses from web")
             self.responses = { 
@@ -25,8 +28,26 @@ class DotaWikiScrapper:
                 in self.fetch_heroes_list().items()
             }
             with open(self.cache, "w", encoding="utf-8") as cached:
-                self.responses = json.dump(self.responses, cached)
+                json.dump(self.responses, cached)
+        print(f"dotawiki - Loaded {len(tuple(self.responses.keys()))} heroes' responses.")
+        if not [hero.name for hero in Hero.objects().all()]:
+            self.populate_db()
 
+    def populate_db(self):
+        answer = input("This function is about to drop all documents in DB. Do you want to proceed? (y/n): ")
+        if answer != "y":
+            return None
+        heroes_deleted = Hero.objects().delete()
+        print(f"Cleared Hero model objects - {heroes_deleted} objects deleted.")
+        responses_deleted = HeroResponse.objects().delete()
+        print(f"Cleared HeroResponse model objects - {responses_deleted} objects deleted.")
+
+        for hero_id, hero_data in self.responses.items():
+            Hero.objects.create(name=hero_data["name"], url_name=hero_id)
+            for url, text in hero_data["responses"].items():
+                HeroResponse.objects.create(text=text, url=url, hero=Hero.objects(name=hero_data["name"]).first())
+            print(f"Inserted {len(list(hero_data['responses'].keys()))} responses of {hero_data['name']} to DB.")
+        print(f"Inserted {len(list(self.responses.keys()))} heroes to DB.")
 
     def fetch_heroes_list(self):
         print("dotawiki - Fetching heroes list...")
@@ -50,47 +71,49 @@ class DotaWikiScrapper:
         def sanitize_response(el: bs4.PageElement) -> str:
             return el.find(text=True, recursive=False)
 
-        responses = {
-            element.text.replace("Link▶️", "").strip(): element.select_one("source")["src"].split("?")[0]
-            for element
-            in responses_elements
-            if (sanitize_response(element) and element.select("source") and not element.select("small span"))
-        }
+        responses = {}
+        
+        for response in responses_elements:
+            response = str(response).replace("</a>", "")
+            link = re.search(r"https:\/\/.+?\.mp3", response)
+            text = re.search(r"[^>]*?</li>", response)
+            if link and text:
+                link = link.group(0)
+                text = text.group(0).replace("</li>", "").strip()
+                responses[link] = text
+
         print(f"dotawiki - Fetched {len(tuple(responses.keys()))} of {hero}'s responses...")
         return responses
 
-    def pick_random_hero_response(self, response: str, strict: bool=True, multi: bool=False):
-        multi_list = []
-        response_stripped = response.lower()
-        for item in string.punctuation:
-            response_stripped = response_stripped.replace(item, "")
-        heroes_list = list(self.responses.keys())
-        random.shuffle(heroes_list)
-        for hero_id in heroes_list:
-            keys = list(self.responses[hero_id]["responses"].keys())
-            for key in keys:
-                key_stripped = key.lower()
-                for item in string.punctuation:
-                    key_stripped = key_stripped.replace(item, "")
-                rule = response_stripped == key_stripped if strict else response_stripped in key_stripped
-                if rule:
-                    print(f"dotawiki - Found response '{key}' of {self.responses[hero_id]['name']}")
-                    hero_response = {
-                        "response": key,
-                        "url": self.responses[hero_id]["responses"][key],
-                        "name": self.responses[hero_id]["name"]
-                    }
-                    if not multi:
-                        return hero_response
-                    else:
-                        multi_list.append(hero_response)
-        if not multi:
-            print(f"dotawiki - No hero response found for '{response}'.")
-            return None
+    def pick_random_hero_response(self, query: str, strict: bool=True, multi: bool=False):
+        if strict:
+            responses = HeroResponse.objects(text__iexact=query)
         else:
-            print(f"dotawiki - Found {len(multi_list)} responses for '{response}'.")
-            return multi_list
+            t = time.perf_counter()
+            responses = HeroResponse.objects.search_text(query).order_by('$text_score').limit(50)
+            print(f"search done in {time.perf_counter() - t}, {len(responses)} found")
+        if not multi:
+            response = responses.first()
+            if not response:
+                result = None
+            else:
+                result = {
+                    "response": response.text,
+                    "url": response.url,
+                    "name": response.hero.name
+                }
+        else:
+            result = []
+            for response in responses:
+                result.append(
+                    {
+                    "response": response.text,
+                    "url": response.url,
+                    "name": response.hero.name
+                    }
+                )
+            print(f"Found {len(result)} responses for query '{query}'")
+        return result
 
 if __name__ == "__main__":
     scrapper = DotaWikiScrapper()
-    print(scrapper.pick_random_hero_response("who calls", strict=False, multi=True))
